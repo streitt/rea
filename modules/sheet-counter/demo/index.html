@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Contador de Chapas</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        --bg: #f4f5f7;
+        --panel: #ffffff;
+        --text: #1b1f24;
+        --muted: #5d6673;
+        --accent: #1f4fd1;
+        --odd: #d8322f;
+        --even: #2f6fe0;
+        --inferred: #e09a1f;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #121418;
+          --panel: #1c1f26;
+          --text: #e8eaee;
+          --muted: #9aa3b0;
+          --accent: #6f95ff;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font:
+          15px/1.4 system-ui,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0;
+      }
+      .count {
+        background: var(--accent);
+        color: #fff;
+        border-radius: 12px;
+        padding: 6px 18px;
+        text-align: center;
+        min-width: 120px;
+      }
+      .count small {
+        display: block;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+      .count strong {
+        font-size: 34px;
+        line-height: 1;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+      }
+      button,
+      label.button,
+      select {
+        font: inherit;
+        border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent);
+        background: var(--panel);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: transparent;
+      }
+      input[type="file"] {
+        display: none;
+      }
+      .stage {
+        position: relative;
+        background: var(--panel);
+        border-radius: 12px;
+        overflow: hidden;
+        touch-action: none;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .hint,
+      .details {
+        color: var(--muted);
+        font-size: 14px;
+        margin-top: 8px;
+      }
+      .details code {
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Contador de Chapas</h1>
+        <div class="count" aria-live="polite">
+          <small>TOTAL</small><strong id="total">–</strong>
+        </div>
+      </header>
+      <div class="toolbar">
+        <label class="button" for="file">📷 Foto</label>
+        <input id="file" type="file" accept="image/*" capture="environment" />
+        <select id="orientation" aria-label="Orientação das chapas">
+          <option value="horizontal">Chapas empilhadas (deitadas)</option>
+          <option value="vertical">Chapas lado a lado (em pé)</option>
+        </select>
+        <button id="count" class="primary" disabled>Contar</button>
+        <button id="export" disabled>Exportar JSON</button>
+      </div>
+      <div class="stage">
+        <canvas id="canvas" width="960" height="540"></canvas>
+      </div>
+      <p class="hint" id="hint">
+        Tire ou escolha uma foto da lateral da pilha. Arraste para enquadrar da
+        primeira à última chapa e toque em <b>Contar</b>. Depois, toque num
+        número para removê-lo ou num espaço vazio para adicionar uma chapa.
+      </p>
+      <p class="details" id="details"></p>
+    </main>
+    <script type="module">
+      import { countSheets } from "../dist/index.js";
+
+      const MAX_SIDE = 1600;
+      const canvas = document.getElementById("canvas");
+      const context = canvas.getContext("2d");
+      const totalEl = document.getElementById("total");
+      const detailsEl = document.getElementById("details");
+      const countButton = document.getElementById("count");
+      const exportButton = document.getElementById("export");
+      const orientationEl = document.getElementById("orientation");
+
+      let photo = null;
+      let pixels = null;
+      let region = null;
+      let drag = null;
+      let result = null;
+      // Markers start from the detector and then carry the operator's edits.
+      let markers = [];
+
+      document
+        .getElementById("file")
+        .addEventListener("change", async (event) => {
+          const file = event.target.files?.[0];
+          if (!file) return;
+          const bitmap = await createImageBitmap(file);
+          const scale = Math.min(
+            1,
+            MAX_SIDE / Math.max(bitmap.width, bitmap.height),
+          );
+          canvas.width = Math.round(bitmap.width * scale);
+          canvas.height = Math.round(bitmap.height * scale);
+          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          photo = bitmap;
+          pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+          region = null;
+          result = null;
+          markers = [];
+          countButton.disabled = false;
+          exportButton.disabled = true;
+          render();
+        });
+
+      function toImage(event) {
+        const box = canvas.getBoundingClientRect();
+        return {
+          x: ((event.clientX - box.left) / box.width) * canvas.width,
+          y: ((event.clientY - box.top) / box.height) * canvas.height,
+        };
+      }
+
+      canvas.addEventListener("pointerdown", (event) => {
+        if (!pixels) return;
+        drag = { start: toImage(event), moved: false };
+        canvas.setPointerCapture(event.pointerId);
+      });
+      canvas.addEventListener("pointermove", (event) => {
+        if (!drag) return;
+        const point = toImage(event);
+        if (Math.hypot(point.x - drag.start.x, point.y - drag.start.y) > 8)
+          drag.moved = true;
+        if (drag.moved) {
+          region = normalize(drag.start, point);
+          render();
+        }
+      });
+      canvas.addEventListener("pointerup", (event) => {
+        if (!drag) return;
+        const point = toImage(event);
+        if (!drag.moved && result) toggleMarker(point);
+        drag = null;
+      });
+
+      function normalize(a, b) {
+        const x = Math.max(0, Math.round(Math.min(a.x, b.x)));
+        const y = Math.max(0, Math.round(Math.min(a.y, b.y)));
+        return {
+          x,
+          y,
+          width: Math.min(canvas.width - x, Math.round(Math.abs(a.x - b.x))),
+          height: Math.min(canvas.height - y, Math.round(Math.abs(a.y - b.y))),
+        };
+      }
+
+      function toggleMarker(point) {
+        const radius = markerRadius();
+        const hit = markers.findIndex(
+          (marker) =>
+            Math.hypot(marker.center.x - point.x, marker.center.y - point.y) <=
+            radius,
+        );
+        if (hit >= 0) markers.splice(hit, 1);
+        else markers.push({ center: point, basis: "manual", confidence: 1 });
+        const along = orientationEl.value === "horizontal" ? "y" : "x";
+        markers.sort((a, b) => a.center[along] - b.center[along]);
+        render();
+      }
+
+      countButton.addEventListener("click", () => {
+        const outcome = countSheets(pixels, {
+          ...(region && region.width > 10 && region.height > 10
+            ? { region }
+            : {}),
+          orientation: orientationEl.value,
+        });
+        if (!outcome.ok) {
+          result = null;
+          markers = [];
+          detailsEl.textContent = `Não foi possível contar: ${outcome.error.message}`;
+          render();
+          return;
+        }
+        result = outcome.value;
+        markers = result.sheets.map((sheet) => ({ ...sheet }));
+        exportButton.disabled = false;
+        render();
+      });
+
+      exportButton.addEventListener("click", () => {
+        const payload = {
+          count: markers.length,
+          detectedCount: result?.count,
+          manualEdits: markers.filter((marker) => marker.basis === "manual")
+            .length,
+          region,
+          analysis: result,
+          markers,
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], {
+          type: "application/json",
+        });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "contagem-chapas.json";
+        link.click();
+        URL.revokeObjectURL(link.href);
+      });
+
+      function markerRadius() {
+        const thickness = result?.thicknessPx ?? 20;
+        return Math.max(7, Math.min(28, thickness * 0.45));
+      }
+
+      function render() {
+        if (!photo) return;
+        context.drawImage(photo, 0, 0, canvas.width, canvas.height);
+        if (region) {
+          context.save();
+          context.fillStyle = "rgba(0,0,0,0.35)";
+          context.beginPath();
+          context.rect(0, 0, canvas.width, canvas.height);
+          context.rect(region.x, region.y, region.width, region.height);
+          context.fill("evenodd");
+          context.strokeStyle = "#fff";
+          context.setLineDash([8, 6]);
+          context.lineWidth = 2;
+          context.strokeRect(region.x, region.y, region.width, region.height);
+          context.restore();
+        }
+        const radius = markerRadius();
+        markers.forEach((marker, i) => {
+          const color =
+            marker.basis === "gap-split" || marker.confidence < 0.5
+              ? "--inferred"
+              : i % 2 === 0
+                ? "--odd"
+                : "--even";
+          context.beginPath();
+          context.arc(marker.center.x, marker.center.y, radius, 0, Math.PI * 2);
+          context.fillStyle = "rgba(255,255,255,0.92)";
+          context.fill();
+          context.lineWidth = Math.max(2, radius * 0.18);
+          context.strokeStyle = getComputedStyle(
+            document.documentElement,
+          ).getPropertyValue(color);
+          context.stroke();
+          context.fillStyle = "#111";
+          context.font = `600 ${Math.round(radius * 0.95)}px system-ui, sans-serif`;
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          context.fillText(String(i + 1), marker.center.x, marker.center.y + 1);
+        });
+        totalEl.textContent = result ? String(markers.length) : "–";
+        if (result) {
+          const edits = markers.filter(
+            (marker) => marker.basis === "manual",
+          ).length;
+          const removed = result.count - (markers.length - edits);
+          detailsEl.innerHTML =
+            `Detectadas <b>${result.count}</b> ` +
+            `(entre juntas ${result.breakdown["between-joints"]}, ` +
+            `inferidas ${result.breakdown["gap-split"]}, bordas ${result.breakdown["stack-edge"]}) · ` +
+            `espessura ≈ ${result.thicknessPx}px · regularidade ${result.periodicity}` +
+            (edits || removed
+              ? ` · ajustes manuais: +${edits} / −${removed}`
+              : "") +
+            (result.warnings.length
+              ? ` · avisos: <code>${result.warnings.join(", ")}</code>`
+              : "");
+        }
+      }
+    </script>
+  </body>
+</html>
