@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Contagem na Linha</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        --bg: #0f1113;
+        --panel: rgba(18, 20, 23, 0.92);
+        --ink: #f2f3f5;
+        --muted: #9aa1aa;
+        --line: #ff4b3e;
+        --track: #d9dde3;
+        --ok: #ffffff;
+        --pending: #8b929b;
+        --rule: #2a2e34;
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          15px/1.4 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+      }
+      .title {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 20px;
+      }
+      .title span {
+        color: var(--line);
+        font-weight: 500;
+      }
+      .tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      button,
+      select,
+      input[type="text"],
+      label.button {
+        font: inherit;
+        color: var(--ink);
+        background: #1b1e22;
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 8px 12px;
+        min-height: 40px;
+        cursor: pointer;
+      }
+      input[type="text"] {
+        cursor: text;
+        width: 10em;
+      }
+      #videoFile {
+        position: absolute;
+        opacity: 0;
+        width: 1px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 300px;
+        gap: 12px;
+        align-items: start;
+      }
+      @media (max-width: 760px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+      .stage {
+        position: relative;
+        background: #000;
+        border-radius: 12px;
+        overflow: hidden;
+        touch-action: none;
+        aspect-ratio: 16 / 9;
+      }
+      .stage video,
+      .stage canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+      .stage canvas {
+        cursor: crosshair;
+      }
+      .empty {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        text-align: center;
+        padding: 24px;
+      }
+      .empty[hidden] {
+        display: none;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        border-radius: 12px;
+        padding: 18px;
+        display: grid;
+        gap: 14px;
+      }
+      .big {
+        display: flex;
+        align-items: flex-end;
+        gap: 12px;
+      }
+      .big strong {
+        font-size: 64px;
+        line-height: 0.9;
+        font-variant-numeric: tabular-nums;
+      }
+      .big span {
+        color: var(--muted);
+      }
+      .chips {
+        display: flex;
+        gap: 18px;
+        font-variant-numeric: tabular-nums;
+      }
+      .chips i {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 6px;
+      }
+      .eyebrow {
+        color: var(--line);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        border-top: 1px solid var(--rule);
+        padding-top: 12px;
+      }
+      #snapshot {
+        width: 100%;
+        aspect-ratio: 4 / 3;
+        background: #000;
+        border: 2px solid #e8eaed;
+        border-radius: 8px;
+      }
+      .last {
+        display: grid;
+        gap: 6px;
+      }
+      .last .row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .last small {
+        color: var(--muted);
+      }
+      .bar {
+        height: 6px;
+        background: #3a3f46;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .bar div {
+        height: 100%;
+        background: #fff;
+        width: 0;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="title">Contagem <span>na linha</span></div>
+      <div class="tools">
+        <button id="camera" type="button">Usar câmera</button>
+        <button id="sample" type="button">Ver exemplo</button>
+        <label class="button" for="videoFile"
+          >Abrir vídeo<input id="videoFile" type="file" accept="video/*"
+        /></label>
+        <input
+          id="itemName"
+          type="text"
+          value="Saco"
+          aria-label="Nome do item"
+        />
+        <select id="direction" aria-label="Sentido contado">
+          <option value="either">Qualquer sentido</option>
+          <option value="left-to-right">Só descendo / para a direita</option>
+          <option value="right-to-left">Só subindo / para a esquerda</option>
+        </select>
+        <button id="relearn" type="button">Reaprender fundo</button>
+        <button id="reset" type="button">Zerar</button>
+      </div>
+      <div class="layout">
+        <div class="stage" id="stage">
+          <video id="video" playsinline muted></video>
+          <canvas id="overlay"></canvas>
+          <div class="empty" id="empty">
+            Abra a câmera ou um vídeo da linha. Arraste sobre a imagem para
+            desenhar a linha de contagem.
+          </div>
+        </div>
+        <aside class="panel" aria-live="polite">
+          <div class="big">
+            <strong id="count">0</strong
+            ><span id="countLabel">sacos contados</span>
+          </div>
+          <div class="chips">
+            <span
+              ><i style="background: var(--ok)"></i
+              ><b id="counted">0</b> contados</span
+            >
+            <span
+              ><i style="background: var(--pending)"></i
+              ><b id="approaching">0</b> a caminho</span
+            >
+          </div>
+          <div class="eyebrow">ÚLTIMO ITEM NA LINHA</div>
+          <canvas id="snapshot" width="320" height="240"></canvas>
+          <div class="last">
+            <div class="row">
+              <span id="lastLabel">–</span><span id="lastConfidence"></span>
+            </div>
+            <small id="lastDetail">Nenhum item passou ainda.</small>
+            <div class="bar"><div id="confidenceBar"></div></div>
+          </div>
+        </aside>
+      </div>
+      <p class="hint" id="status">
+        A câmera precisa ficar parada. Nos primeiros segundos o contador aprende
+        como é a linha vazia.
+      </p>
+    </main>
+    <script type="module">
+      import * as ItemCounter from "../dist/index.js";
+
+      const PROCESS_WIDTH = 480;
+      const video = document.getElementById("video");
+      const overlay = document.getElementById("overlay");
+      const octx = overlay.getContext("2d");
+      const work = document.createElement("canvas");
+      const wctx = work.getContext("2d", { willReadFrequently: true });
+      const snapshot = document.getElementById("snapshot");
+      const sctx = snapshot.getContext("2d");
+      const el = (id) => document.getElementById(id);
+
+      let detector = new ItemCounter.MotionDetector();
+      let line = null;
+      let counter = null;
+      let state = null;
+      let running = false;
+      let drag = null;
+      let flash = new Map();
+
+      function itemName() {
+        return el("itemName").value.trim() || "Item";
+      }
+      function plural(name) {
+        return name.toLowerCase().endsWith("s")
+          ? name.toLowerCase()
+          : name.toLowerCase() + "s";
+      }
+      function newCounter() {
+        counter = new ItemCounter.LineCounter({
+          line,
+          direction: el("direction").value,
+        });
+        state = null;
+        render();
+      }
+
+      el("camera").addEventListener("click", async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment", width: { ideal: 1280 } },
+            audio: false,
+          });
+          start(() => {
+            video.srcObject = stream;
+          });
+        } catch (error) {
+          el("status").textContent =
+            "A câmera não está disponível aqui (" +
+            (error?.name || "erro") +
+            "). Abra um vídeo gravado da linha.";
+        }
+      });
+      // Example line: bags of granules dropping past a steel frame, drawn live.
+      el("sample").addEventListener("click", () => {
+        const scene = document.createElement("canvas");
+        scene.width = 640;
+        scene.height = 360;
+        const g = scene.getContext("2d");
+        const grain = document.createElement("canvas");
+        grain.width = grain.height = 64;
+        const gg = grain.getContext("2d");
+        for (let i = 0; i < 260; i++) {
+          gg.fillStyle = `hsl(${32 + Math.random() * 8}, 55%, ${48 + Math.random() * 25}%)`;
+          gg.beginPath();
+          gg.arc(
+            Math.random() * 64,
+            Math.random() * 64,
+            2 + Math.random() * 2.5,
+            0,
+            Math.PI * 2,
+          );
+          gg.fill();
+        }
+        const pattern = g.createPattern(grain, "repeat");
+        const period = 34;
+        let frame = 0;
+        const draw = () => {
+          const steel = g.createLinearGradient(0, 0, 640, 0);
+          steel.addColorStop(0, "#5d6168");
+          steel.addColorStop(0.5, "#9aa0a8");
+          steel.addColorStop(1, "#6b7077");
+          g.fillStyle = steel;
+          g.fillRect(0, 0, 640, 360);
+          g.fillStyle = "#1d1f22";
+          g.fillRect(96, 0, 44, 360);
+          g.fillRect(0, 70, 640, 26);
+          const y = -100 + (frame % period) * 13;
+          g.save();
+          g.beginPath();
+          g.ellipse(
+            320 + 10 * Math.sin(frame / period),
+            y,
+            48,
+            92,
+            0,
+            0,
+            Math.PI * 2,
+          );
+          g.fillStyle = pattern;
+          g.fill();
+          g.lineWidth = 3;
+          g.strokeStyle = "rgba(230,235,240,0.7)";
+          g.stroke();
+          g.restore();
+          frame += 1;
+        };
+        draw();
+        setInterval(draw, 1000 / 30);
+        start(() => {
+          video.src = "";
+          video.srcObject = scene.captureStream(30);
+        });
+        el("status").textContent =
+          "Exemplo gerado na página: um saco a cada " +
+          (period / 30).toFixed(1) +
+          " s cruzando a linha.";
+      });
+      el("videoFile").addEventListener("change", (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        start(() => {
+          video.srcObject = null;
+          video.src = URL.createObjectURL(file);
+          video.loop = false;
+        });
+      });
+
+      function start(attach) {
+        attach();
+        video.onloadedmetadata = () => {
+          const scale = Math.min(1, PROCESS_WIDTH / video.videoWidth);
+          work.width = Math.round(video.videoWidth * scale);
+          work.height = Math.round(video.videoHeight * scale);
+          overlay.width = work.width;
+          overlay.height = work.height;
+          el("stage").style.aspectRatio =
+            `${video.videoWidth} / ${video.videoHeight}`;
+          if (!line) {
+            line = {
+              from: { x: 0, y: work.height * 0.62 },
+              to: { x: work.width, y: work.height * 0.62 },
+            };
+          }
+          detector.reset();
+          newCounter();
+          el("empty").hidden = true;
+          video.play();
+          if (!running) {
+            running = true;
+            requestAnimationFrame(tick);
+          }
+        };
+      }
+
+      function tick() {
+        if (video.readyState >= 2 && !video.paused && !video.ended) {
+          wctx.drawImage(video, 0, 0, work.width, work.height);
+          const frame = wctx.getImageData(0, 0, work.width, work.height);
+          const detections = detector.detect(frame);
+          const time = video.srcObject
+            ? performance.now()
+            : video.currentTime * 1000;
+          state = counter.update(detections, time);
+          for (const event of state.newEvents) {
+            flash.set(event.trackId, 12);
+            drawSnapshot(event);
+          }
+        }
+        render();
+        requestAnimationFrame(tick);
+      }
+
+      function drawSnapshot(event) {
+        const pad = 0.25;
+        const w = event.box.width * (1 + 2 * pad);
+        const h = event.box.height * (1 + 2 * pad);
+        const scale = Math.min(snapshot.width / w, snapshot.height / h);
+        const x0 = event.box.x - event.box.width * pad;
+        const y0 = event.box.y - event.box.height * pad;
+        sctx.fillStyle = "#000";
+        sctx.fillRect(0, 0, snapshot.width, snapshot.height);
+        const dx = (snapshot.width - w * scale) / 2;
+        const dy = (snapshot.height - h * scale) / 2;
+        sctx.drawImage(work, x0, y0, w, h, dx, dy, w * scale, h * scale);
+        sctx.strokeStyle = getComputedStyle(
+          document.documentElement,
+        ).getPropertyValue("--line");
+        sctx.lineWidth = 2;
+        sctx.beginPath();
+        sctx.moveTo(
+          dx + (line.from.x - x0) * scale,
+          dy + (line.from.y - y0) * scale,
+        );
+        sctx.lineTo(
+          dx + (line.to.x - x0) * scale,
+          dy + (line.to.y - y0) * scale,
+        );
+        sctx.stroke();
+        const name = event.label || itemName();
+        el("lastLabel").textContent = name;
+        el("lastConfidence").textContent =
+          Math.round(event.confidence * 100) + "%";
+        el("confidenceBar").style.width =
+          Math.round(event.confidence * 100) + "%";
+        el("lastDetail").textContent =
+          "item #" +
+          event.index +
+          (event.intervalMs === undefined
+            ? ""
+            : " · " +
+              (event.intervalMs / 1000).toFixed(1) +
+              " s desde o anterior");
+      }
+
+      function render() {
+        el("count").textContent = state ? state.count : 0;
+        el("counted").textContent = state ? state.count : 0;
+        el("approaching").textContent = state ? state.approaching : 0;
+        el("countLabel").textContent = plural(itemName()) + " contados";
+        octx.clearRect(0, 0, overlay.width, overlay.height);
+        if (!line) return;
+        const css = getComputedStyle(document.documentElement);
+        for (const track of state ? state.tracks : []) {
+          const lit = (flash.get(track.id) ?? 0) > 0;
+          octx.strokeStyle = lit
+            ? css.getPropertyValue("--line")
+            : css.getPropertyValue("--track");
+          octx.lineWidth = lit ? 3 : 1.5;
+          octx.strokeRect(
+            track.box.x,
+            track.box.y,
+            track.box.width,
+            track.box.height,
+          );
+        }
+        for (const [id, frames] of flash) {
+          if (frames <= 1) flash.delete(id);
+          else flash.set(id, frames - 1);
+        }
+        octx.strokeStyle = css.getPropertyValue("--line");
+        octx.lineWidth = 3;
+        octx.beginPath();
+        octx.moveTo(line.from.x, line.from.y);
+        octx.lineTo(line.to.x, line.to.y);
+        octx.stroke();
+      }
+
+      function toWork(event) {
+        const box = overlay.getBoundingClientRect();
+        const scale = Math.min(
+          box.width / overlay.width,
+          box.height / overlay.height,
+        );
+        return {
+          x:
+            (event.clientX -
+              box.left -
+              (box.width - overlay.width * scale) / 2) /
+            scale,
+          y:
+            (event.clientY -
+              box.top -
+              (box.height - overlay.height * scale) / 2) /
+            scale,
+        };
+      }
+      overlay.addEventListener("pointerdown", (event) => {
+        if (!counter) return;
+        drag = toWork(event);
+        overlay.setPointerCapture(event.pointerId);
+      });
+      overlay.addEventListener("pointermove", (event) => {
+        if (!drag) return;
+        const point = toWork(event);
+        if (Math.hypot(point.x - drag.x, point.y - drag.y) < 10) return;
+        line = { from: drag, to: point };
+        counter.setLine(line);
+        render();
+      });
+      overlay.addEventListener("pointerup", () => {
+        drag = null;
+      });
+
+      el("direction").addEventListener("change", () => line && newCounter());
+      el("reset").addEventListener("click", () => line && newCounter());
+      el("relearn").addEventListener("click", () => detector.reset());
+      el("itemName").addEventListener("input", render);
+      window.ItemCounterDemo = { getState: () => state };
+    </script>
+  </body>
+</html>
